@@ -56,7 +56,7 @@ jobs:
           version: "latest"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --group dev
 
       - name: Run Person 1 unit tests
         run: uv run pytest tests/test_schema.py tests/test_model_a.py tests/test_verify.py tests/test_triage.py -v --tb=short
@@ -91,7 +91,7 @@ jobs:
           version: "latest"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --group dev
 
       - name: Check artifacts exist
         run: |
@@ -105,7 +105,7 @@ jobs:
           uv run python - <<'EOF'
           import pandas as pd, sys
           df = pd.read_parquet("artifacts/a/predictions_a.parquet")
-          required = {"basin_id", "timestamp", "prob_flood", "split"}
+          required = {"basin_id", "timestamp_utc", "prob", "split"}
           missing = required - set(df.columns)
           if missing:
               print(f"FAIL: missing columns: {missing}")
@@ -149,7 +149,7 @@ jobs:
           version: "latest"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --group dev
 
       - name: D-01 Drift guard check
         run: |
