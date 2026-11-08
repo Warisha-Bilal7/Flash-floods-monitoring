@@ -1,100 +1,145 @@
-"""
-Data Source Health Monitor (health.py)
-======================================
-Monitors ingest freshness, latency, and staleness across meteorological feeds.
-Generates source_health.json consumed by runner.py and Streamlit UI badge.
+"""Ingest stream health: cadence, lag and staleness.
+
+Qamran's lane in §6.7; implemented minimally because the runner report and the
+dashboard must show it. Never crashes a run: a missing or unreadable health file
+degrades to an ``unknown`` block.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_PATH = ROOT / "data" / "processed" / "source_health.json"
+STREAMS = ("archive", "flood", "forecast")
+CADENCE_H = {"archive": 24.0, "flood": 24.0, "forecast": 6.0}
+
+
+def _as_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
 @dataclass(frozen=True)
-class StreamHealth:
-    stream_name: str
+class SourceHealth:
     last_valid_utc: str | None
-    lag_hours: float
+    lag_hours: float | None
     expected_cadence_h: float
     stale: bool
     fallback_used: bool
 
-
-@dataclass(frozen=True)
-class SourceHealthReport:
-    evaluated_at: str
-    overall_status: str  # "healthy" | "degraded" | "critical"
-    streams: dict[str, StreamHealth]
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
-def evaluate_stream_health(
-    stream_name: str,
-    last_timestamp: datetime | None,
-    expected_cadence_h: float = 1.0,
-    now: datetime | None = None,
-    fallback_used: bool = False
-) -> StreamHealth:
-    """Evaluates staleness of a single meteorological ingest stream."""
-    if now is None:
-        now = datetime.now(timezone.utc)
-    elif now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-
-    if last_timestamp is None:
-        return StreamHealth(
-            stream_name=stream_name,
-            last_valid_utc=None,
-            lag_hours=999.0,
-            expected_cadence_h=expected_cadence_h,
-            stale=True,
-            fallback_used=fallback_used
-        )
-
-    if last_timestamp.tzinfo is None:
-        last_timestamp = last_timestamp.replace(tzinfo=timezone.utc)
-
-    lag_hours = max(0.0, (now - last_timestamp).total_seconds() / 3600.0)
-    is_stale = lag_hours > (2.0 * expected_cadence_h)
-
-    return StreamHealth(
-        stream_name=stream_name,
-        last_valid_utc=last_timestamp.isoformat(),
-        lag_hours=round(lag_hours, 2),
-        expected_cadence_h=expected_cadence_h,
-        stale=is_stale,
-        fallback_used=fallback_used
+def assess_source(
+    name: str,
+    *,
+    last_valid_utc: str | datetime | None,
+    expected_cadence_h: float | None = None,
+    now: str | datetime | None = None,
+    fallback_used: bool = False,
+) -> SourceHealth:
+    cadence = float(expected_cadence_h or CADENCE_H.get(name, 24.0))
+    last = _as_utc(last_valid_utc)
+    now_dt = _as_utc(now) or datetime.now(UTC)
+    if last is None:
+        return SourceHealth(None, None, cadence, True, fallback_used)
+    lag = max(0.0, (now_dt - last).total_seconds() / 3600.0)
+    return SourceHealth(
+        last_valid_utc=last.isoformat(),
+        lag_hours=round(lag, 2),
+        expected_cadence_h=cadence,
+        stale=bool(lag > 2.0 * cadence),
+        fallback_used=fallback_used,
     )
 
 
-def build_health_report(
-    streams: dict[str, StreamHealth],
-    now: datetime | None = None
-) -> SourceHealthReport:
-    """Constructs comprehensive health status report."""
-    if now is None:
-        now = datetime.now(timezone.utc)
+def build_health(
+    *,
+    last_valid: dict[str, str | datetime | None],
+    now: str | datetime | None = None,
+    fallback: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    fallback = fallback or {}
+    sources = {
+        name: assess_source(
+            name,
+            last_valid_utc=last_valid.get(name),
+            now=now,
+            fallback_used=bool(fallback.get(name, False)),
+        ).as_dict()
+        for name in STREAMS
+    }
+    return {
+        "schema_version": 1,
+        "generated_at": (_as_utc(now) or datetime.now(UTC)).isoformat(),
+        "any_stale": any(block["stale"] for block in sources.values()),
+        "sources": sources,
+    }
 
-    stale_count = sum(1 for s in streams.values() if s.stale)
-    if stale_count == 0:
-        status = "healthy"
-    elif stale_count < len(streams):
-        status = "degraded"
-    else:
-        status = "critical"
 
-    return SourceHealthReport(
-        evaluated_at=now.isoformat(),
-        overall_status=status,
-        streams=streams
-    )
-
-
-def save_source_health(report: SourceHealthReport, output_path: Path | str = "data/processed/source_health.json") -> None:
-    """Persists health report to disk."""
-    p = Path(output_path)
+def write_source_health(payload: dict[str, Any], path: str | Path | None = None) -> Path:
+    p = Path(path or DEFAULT_PATH)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(asdict(report), f, indent=2)
+    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return p
+
+
+def read_source_health(path: str | Path | None = None) -> dict[str, Any]:
+    """Read the health block; a missing file degrades, never crashes."""
+    p = Path(path or DEFAULT_PATH)
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
+        return degraded_health("source health file is missing or unreadable")
+    if not isinstance(payload, dict) or "sources" not in payload:
+        return degraded_health("source health file is malformed")
+    return payload
+
+
+def degraded_health(reason: str) -> dict[str, Any]:
+    sources = {
+        name: SourceHealth(None, None, CADENCE_H[name], True, True).as_dict() for name in STREAMS
+    }
+    return {
+        "schema_version": 1,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "any_stale": True,
+        "degraded": True,
+        "reason": reason,
+        "sources": sources,
+    }
+
+
+def stale_sources(payload: dict[str, Any]) -> list[str]:
+    return [
+        name
+        for name, block in (payload.get("sources") or {}).items()
+        if bool(block.get("stale", False))
+    ]
+
+
+__all__ = [
+    "CADENCE_H",
+    "STREAMS",
+    "SourceHealth",
+    "assess_source",
+    "build_health",
+    "degraded_health",
+    "read_source_health",
+    "stale_sources",
+    "write_source_health",
+]

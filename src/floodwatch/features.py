@@ -1,86 +1,167 @@
-"""
-Feature Engineering Engine (features.py)
-========================================
-Transforms raw meteorological series into hydrological and meteorological indicators.
-Zero PyTorch or scikit-learn dependency.
+"""Feature engineering for the two mechanisms.
+
+Scaffolding for the person-1 lane (M1): a single feature table, one
+implementation, no forks. Columns are the contract both models read.
+
+No feature uses data beyond the forecast horizon. Labels are computed from the
+future and are the only column allowed to look forward.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_BASINS = ROOT / "configs" / "basins.yaml"
+
+RAW_COLUMNS: tuple[str, ...] = (
+    "basin_id",
+    "timestamp_utc",
+    "rain_mm",
+    "rain_fcst_mm_3h",
+    "temp_c",
+    "temp_fcst_c",
+    "freezing_level_m",
+    "soil_moisture",
+    "snow_depth_mm",
+    "snowmelt_mm",
+    "discharge_m3s",
+    "snow_fraction",
+    "elevation_mean_m",
+    "terrain_susceptibility",
+)
+
+# The temporal sequence Model B reads (snowmelt emphasis).
+FEATURE_COLUMNS_B: tuple[str, ...] = (
+    "rain_1h",
+    "rain_3h",
+    "rain_24h",
+    "rain_72h",
+    "rain_fcst_mm_3h",
+    "temp_c",
+    "temp_fcst_c",
+    "freezing_level_m",
+    "soil_moisture",
+    "snow_depth_mm",
+    "snowmelt_mm",
+    "degree_day_melt",
+    "rain_on_snow",
+    "terrain_susceptibility",
+)
+
+# Model A's temporal branch (cloudburst emphasis). The spatial branch consumes
+# the 3x3 patch built by the ingest lane.
+FEATURE_COLUMNS_A: tuple[str, ...] = (
+    "rain_1h",
+    "rain_3h",
+    "rain_24h",
+    "rain_72h",
+    "rain_fcst_mm_3h",
+    "temp_c",
+    "freezing_level_m",
+    "soil_moisture",
+    "terrain_susceptibility",
+)
+
+DEFAULT_FEATURE_COLUMNS = FEATURE_COLUMNS_B
 
 
-def compute_accumulations(series: pd.Series, windows: list[int] | None = None) -> dict[str, pd.Series]:
-    """Computes backward rolling sum of precipitation for given hour windows."""
-    if windows is None:
-        windows = [1, 3, 24, 72]
-    accums = {}
-    for w in windows:
-        accums[f"rain_{w}h"] = series.rolling(window=w, min_periods=1).sum()
-    return accums
+def load_basins(path: str | Path | None = None) -> list[dict]:
+    data = yaml.safe_load(Path(path or DEFAULT_BASINS).read_text(encoding="utf-8"))
+    return list(data["basins"])
 
 
-def compute_degree_day_melt(temp_celsius: pd.Series, base_temp: float = 0.0, degree_factor: float = 2.5) -> pd.Series:
-    """Computes daily snowmelt potential via standard degree-day method (mm/day)."""
-    excess_temp = np.maximum(0.0, temp_celsius - base_temp)
-    # hourly melt rate: (excess * factor) / 24
-    return (excess_temp * degree_factor) / 24.0
+def basin_ids(path: str | Path | None = None) -> list[str]:
+    return [b["basin_id"] for b in load_basins(path)]
 
 
-def compute_rain_on_snow(
-    rain_1h: pd.Series,
-    temp_2m: pd.Series,
-    snow_depth: pd.Series,
-    rain_threshold_mm: float = 2.0,
-    temp_threshold_c: float = 1.0,
-    snow_threshold_cm: float = 5.0
-) -> pd.Series:
-    """Computes boolean / magnitude interaction term for rain-on-snow melt dynamics."""
-    ros_condition = (
-        (rain_1h >= rain_threshold_mm) &
-        (temp_2m >= temp_threshold_c) &
-        (snow_depth >= snow_threshold_cm)
+def add_features(raw: pd.DataFrame) -> pd.DataFrame:
+    """Add rolling rainfall aggregates and interaction terms."""
+    df = raw.copy()
+    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
+    df = df.sort_values(["basin_id", "timestamp_utc"]).reset_index(drop=True)
+
+    grouped = df.groupby("basin_id", group_keys=False, sort=False)
+    for hours, name in ((1, "rain_1h"), (3, "rain_3h"), (24, "rain_24h"), (72, "rain_72h")):
+        df[name] = grouped["rain_mm"].transform(
+            lambda series, window=hours: series.rolling(window, min_periods=1).sum()
+        )
+
+    # Rain-on-snow: liquid water on an existing snowpack drives the melt mechanism.
+    snow_present = (df["snow_depth_mm"].astype(float) > 5.0).astype(float)
+    df["rain_on_snow"] = df["rain_3h"].astype(float) * snow_present * df["snow_fraction"]
+
+    # Degree-day melt, explicit so the baseline and the model share it.
+    df["degree_day_melt"] = (
+        np.clip(df["temp_c"].astype(float), 0.0, None) * 0.06 * df["snow_fraction"]
     )
-    # Returns precipitation magnitude when condition is met, else 0
-    return np.where(ros_condition, rain_1h, 0.0)
+
+    return df
 
 
-def build_feature_table(
-    df: pd.DataFrame,
-    terrain_susceptibility: float = 0.5
+def add_labels(
+    features: pd.DataFrame,
+    *,
+    horizon_h: int = 6,
+    train_mask: pd.Series | np.ndarray | None = None,
 ) -> pd.DataFrame:
+    """Label = a flood proxy anywhere in the next ``horizon_h`` hours.
+
+    Thresholds are estimated on the train split only so the label itself does
+    not leak validation quantiles.
     """
-    Constructs the canonical feature set for a single basin time series.
-    Input df must contain:
-      ['timestamp_utc', 'precipitation', 'temperature_2m',
-       'freezing_level_height', 'snow_depth', 'soil_moisture_0_to_7cm']
-    """
-    df = df.sort_values("timestamp_utc").reset_index(drop=True).copy()
+    df = features.copy()
+    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
+    df = df.sort_values(["basin_id", "timestamp_utc"]).reset_index(drop=True)
 
-    # Rename / aliases
-    precip = df["precipitation"]
-    temp = df["temperature_2m"]
-    df["freezing_level_height"]
-    snow = df["snow_depth"]
-    df["soil_moisture_0_to_7cm"]
+    if train_mask is None:
+        train_mask = pd.Series(True, index=df.index)
+    train_mask = pd.Series(train_mask, index=df.index).fillna(False).astype(bool)
 
-    # Rolling rainfall accumulations
-    accums = compute_accumulations(precip, [1, 3, 24, 72])
-    for col, s in accums.items():
-        df[col] = s
+    thresholds: dict[str, dict[str, float]] = {}
+    for basin_id, group in df.groupby("basin_id", sort=True):
+        train_group = group[train_mask.loc[group.index]]
+        if train_group.empty:
+            train_group = group
+        thresholds[basin_id] = {
+            "rain": float(train_group["rain_3h"].quantile(0.975)),
+            "melt": float(train_group["degree_day_melt"].quantile(0.90)),
+        }
 
-    # 6-hour rainfall forecast (rolling forward sum)
-    df["rain_forecast_6h"] = precip.iloc[::-1].rolling(window=6, min_periods=1).sum().iloc[::-1].shift(-6).fillna(0.0)
+    labels = pd.Series(0, index=df.index, dtype="int8")
+    for basin_id, group in df.groupby("basin_id", sort=True):
+        idx = group.index
+        rain = group["rain_3h"].astype(float)
+        melt = group["degree_day_melt"].astype(float)
+        # max over t+1 .. t+horizon_h
+        future_rain = rain.rolling(horizon_h, min_periods=1).max().shift(-horizon_h)
+        future_melt = melt.rolling(horizon_h, min_periods=1).max().shift(-horizon_h)
+        hit = (future_rain >= thresholds[basin_id]["rain"]) | (
+            future_melt >= thresholds[basin_id]["melt"]
+        )
+        labels.loc[idx] = hit.fillna(False).astype("int8")
 
-    # Hydrological interactions
-    df["degree_day_melt"] = compute_degree_day_melt(temp)
-    df["rain_on_snow"] = compute_rain_on_snow(precip, temp, snow)
-    df["terrain_susceptibility"] = float(terrain_susceptibility)
+    df["label"] = labels
+    df.attrs["label_thresholds"] = thresholds
+    return df
 
-    # 6-hour flood target label (for supervised training)
-    # Definition: extreme rain (>20mm in 1h or >40mm in 3h or ROS > 10mm)
-    flood_signal = (df["rain_1h"] >= 20.0) | (df["rain_3h"] >= 40.0) | (df["rain_on_snow"] >= 10.0)
-    df["label_flood_6h"] = flood_signal.iloc[::-1].rolling(window=6, min_periods=1).max().iloc[::-1].shift(-6).fillna(0).astype(int)
 
+def feature_table(raw: pd.DataFrame, *, train_mask=None, horizon_h: int = 6) -> pd.DataFrame:
+    return add_labels(add_features(raw), horizon_h=horizon_h, train_mask=train_mask)
+
+
+def write_features(df: pd.DataFrame, path: str | Path) -> Path:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(p, index=False)
+    return p
+
+
+def read_features(path: str | Path) -> pd.DataFrame:
+    df = pd.read_parquet(path)
+    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
     return df

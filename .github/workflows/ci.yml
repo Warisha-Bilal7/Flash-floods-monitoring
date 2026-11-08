@@ -1,192 +1,129 @@
-name: FloodWatch KP — CI
+name: CI
 
 on:
   push:
-    branches:
-      - feature/person-a
-      - feature/person-b
-      - warisha/ensemble
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
-  # ─────────────────────────────────────────────
-  # JOB 1: Lint & Static Analysis
-  # ─────────────────────────────────────────────
   lint:
-    name: Lint (Ruff)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
 
-      - name: Install Ruff
-        run: pip install ruff
-
-      - name: Run Ruff lint
-        run: ruff check src/ scripts/ tests/ --output-format=github
-
-  # ─────────────────────────────────────────────
-  # JOB 2: Unit Tests (Person 1 Scope)
-  # ─────────────────────────────────────────────
-  test-person-a:
-    name: Tests — Person 1 (Model A, Schema, Verify, Triage)
+  tests:
     runs-on: ubuntu-latest
-    needs: lint
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+      - name: Install CPU torch
+        run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - run: pip install -r requirements-dev.txt
+      - run: pip install -e .
+      - run: python -m pytest -q -m "not network"
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
-      - name: Install dependencies
-        run: uv sync --group dev
-
-      - name: Run Person 1 unit tests
-        run: uv run pytest tests/test_schema.py tests/test_model_a.py tests/test_verify.py tests/test_triage.py -v --tb=short
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-person-a
-          path: .pytest_cache/
-
-  # ─────────────────────────────────────────────
-  # JOB 3: Artifact Schema Validation
-  # ─────────────────────────────────────────────
-  validate-artifacts:
-    name: Validate Model A Artifacts
+  contract:
     runs-on: ubuntu-latest
-    needs: test-person-a
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt && pip install -e .
+      - run: python -m pytest -q tests/test_schema.py tests/test_tiers.py tests/test_model_output_files.py
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
-      - name: Install dependencies
-        run: uv sync --group dev
-
-      - name: Check artifacts exist
-        run: |
-          echo "Checking required artifacts..."
-          test -f artifacts/a/model_a.pt        && echo "✅ model_a.pt found"        || (echo "❌ model_a.pt missing" && exit 1)
-          test -f artifacts/a/predictions_a.parquet && echo "✅ predictions_a.parquet found" || (echo "❌ predictions_a.parquet missing" && exit 1)
-          test -f artifacts/a/manifest.json     && echo "✅ manifest.json found"     || (echo "❌ manifest.json missing" && exit 1)
-
-      - name: Validate parquet schema
-        run: |
-          uv run python - <<'EOF'
-          import pandas as pd, sys
-          df = pd.read_parquet("artifacts/a/predictions_a.parquet")
-          required = {"basin_id", "timestamp_utc", "prob", "split"}
-          missing = required - set(df.columns)
-          if missing:
-              print(f"FAIL: missing columns: {missing}")
-              sys.exit(1)
-          print(f"PASS: parquet schema valid — {len(df):,} rows, columns: {list(df.columns)}")
-          EOF
-
-      - name: Validate manifest
-        run: |
-          uv run python - <<'EOF'
-          import json, sys
-          with open("artifacts/a/manifest.json") as f:
-              m = json.load(f)
-          required = {"model", "train_start", "train_end", "val_year", "val_f1", "val_pod", "val_far", "pr_auc"}
-          missing = required - set(m.keys())
-          if missing:
-              print(f"WARN: manifest missing keys: {missing}")
-          print(f"PASS: manifest OK — val_f1={m.get('val_f1')}, pr_auc={m.get('pr_auc')}")
-          EOF
-
-  # ─────────────────────────────────────────────
-  # JOB 4: Decision D-01 Drift Guard
-  # ─────────────────────────────────────────────
-  drift-guard:
-    name: Decision D-01 Calibration Drift Guard
+  golden:
     runs-on: ubuntu-latest
-    needs: validate-artifacts
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt && pip install -e .
+      - run: python -m pytest -q tests/test_golden_replay.py
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+  fusion-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          version: "latest"
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt && pip install -e .
+      - run: python -m pytest -q tests/test_fusion.py
 
-      - name: Install dependencies
-        run: uv sync --group dev
+  app-imports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      # Deliberately runtime-only: no torch, no sklearn.
+      - run: pip install -r requirements.txt
+      - run: pip install pytest
+      - run: pip install -e . --no-deps
+      - run: python -m pytest -q tests/test_app_imports.py
 
-      - name: D-01 Drift guard check
+  ownership:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install PyYAML
+      - name: Enforce ownership
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_BRANCH: ${{ github.head_ref }}
         run: |
-          uv run python - <<'EOF'
-          import json, sys
+          python scripts/check_ownership.py \
+            --base "origin/${{ github.base_ref }}" \
+            --branch "$PR_BRANCH" \
+            --labels "$PR_LABELS"
 
-          with open("artifacts/a/manifest.json") as f:
-              m = json.load(f)
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # Thresholds from D-01 spec
-          POD_MIN   = 0.70   # Minimum acceptable POD
-          FAR_MAX   = 0.70   # Maximum acceptable FAR
-          F1_MIN    = 0.50   # Minimum acceptable F1
-          PR_AUC_MIN = 0.70  # Minimum acceptable PR-AUC
-
-          pod    = m.get("val_pod",  0)
-          far    = m.get("val_far",  1)
-          f1     = m.get("val_f1",   0)
-          pr_auc = m.get("pr_auc",   0)
-
-          failures = []
-          if pod < POD_MIN:    failures.append(f"POD {pod:.4f} < {POD_MIN} threshold")
-          if far > FAR_MAX:    failures.append(f"FAR {far:.4f} > {FAR_MAX} threshold")
-          if f1  < F1_MIN:     failures.append(f"F1  {f1:.4f} < {F1_MIN} threshold")
-          if pr_auc < PR_AUC_MIN: failures.append(f"PR-AUC {pr_auc:.4f} < {PR_AUC_MIN} threshold")
-
-          print("── D-01 Calibration Drift Guard ──────────────────")
-          print(f"  POD    : {pod:.4f}  (min {POD_MIN})")
-          print(f"  FAR    : {far:.4f}  (max {FAR_MAX})")
-          print(f"  F1     : {f1:.4f}  (min {F1_MIN})")
-          print(f"  PR-AUC : {pr_auc:.4f}  (min {PR_AUC_MIN})")
-          print("──────────────────────────────────────────────────")
-
-          if failures:
-              for f in failures:
-                  print(f"❌ FAIL: {f}")
-              sys.exit(1)
-          else:
-              print("✅ D-01 PASSED — Model A is deployment-ready")
-          EOF
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt pip-audit
+      - run: pip-audit -r requirements.txt

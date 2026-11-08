@@ -1,95 +1,88 @@
-# Basins Configuration: 8 Northern Khyber Pakhtunkhwa River Basins
-# Coordinate centroids and terrain attributes
+# Eight monitored control points in northern Khyber Pakhtunkhwa.
+#
+# These are river gauging / outlet control points, NOT delineated catchments.
+# Coordinates and elevations are approximate: they drive the synthetic demo and
+# the 3x3 Open-Meteo patch, and must not be cited as survey data.
+
 schema_version: 1
 
 basins:
-  # Swat River Basin
-  swat_kalam:
-    name: "Kalam"
-    river: "Swat"
-    district: "Swat"
-    lat: 35.4906
-    lon: 72.5796
-    elevation_m: 2000
-    slope_deg: 24.5
+  - basin_id: swat_kalam
+    name: Swat River at Kalam
+    district: Swat
+    lon: 72.58
+    lat: 35.48
+    elevation_mean_m: 2100
+    snow_fraction: 0.35
     terrain_susceptibility: 0.82
-    drainage_area_km2: 650.0
+    primary_mechanism: cloudburst
 
-  swat_madyan:
-    name: "Madyan"
-    river: "Swat"
-    district: "Swat"
-    lat: 35.1375
-    lon: 72.5342
-    elevation_m: 1320
-    slope_deg: 19.8
+  - basin_id: swat_madyan
+    name: Swat River at Madyan
+    district: Swat
+    lon: 72.53
+    lat: 35.15
+    elevation_mean_m: 1600
+    snow_fraction: 0.28
     terrain_susceptibility: 0.74
-    drainage_area_km2: 1420.0
+    primary_mechanism: cloudburst
 
-  swat_chakdara:
-    name: "Chakdara"
-    river: "Swat"
-    district: "Lower Dir"
-    lat: 34.6567
-    lon: 72.0361
-    elevation_m: 690
-    slope_deg: 12.1
-    terrain_susceptibility: 0.58
-    drainage_area_km2: 5780.0
+  - basin_id: swat_chakdara
+    name: Swat River at Chakdara
+    district: Swat
+    lon: 72.03
+    lat: 34.65
+    elevation_mean_m: 1100
+    snow_fraction: 0.18
+    terrain_susceptibility: 0.61
+    primary_mechanism: cloudburst
 
-  # Panjkora River Basin
-  panjkora_dir:
-    name: "Upper Dir"
-    river: "Panjkora"
-    district: "Upper Dir"
-    lat: 35.2074
-    lon: 71.8753
-    elevation_m: 1420
-    slope_deg: 22.0
+  - basin_id: panjkora_dir
+    name: Panjkora River at Dir
+    district: Upper Dir
+    lon: 71.88
+    lat: 35.20
+    elevation_mean_m: 1420
+    snow_fraction: 0.32
     terrain_susceptibility: 0.79
-    drainage_area_km2: 890.0
+    primary_mechanism: cloudburst
 
-  panjkora_talash:
-    name: "Talash"
-    river: "Panjkora"
-    district: "Lower Dir"
-    lat: 34.7214
-    lon: 71.9167
-    elevation_m: 780
-    slope_deg: 14.3
-    terrain_susceptibility: 0.62
-    drainage_area_km2: 2450.0
+  - basin_id: panjkora_talash
+    name: Panjkora River at Talash
+    district: Lower Dir
+    lon: 71.90
+    lat: 34.90
+    elevation_mean_m: 900
+    snow_fraction: 0.16
+    terrain_susceptibility: 0.66
+    primary_mechanism: mixed
 
-  # Chitral River Basin
-  chitral_mastuj:
-    name: "Mastuj"
-    river: "Chitral"
-    district: "Upper Chitral"
-    lat: 36.2792
-    lon: 72.5117
-    elevation_m: 2359
-    slope_deg: 26.8
-    terrain_susceptibility: 0.88
-    drainage_area_km2: 1250.0
+  - basin_id: chitral_mastuj
+    name: Chitral River at Mastuj
+    district: Upper Chitral
+    lon: 72.55
+    lat: 36.28
+    elevation_mean_m: 2400
+    snow_fraction: 0.55
+    terrain_susceptibility: 0.85
+    primary_mechanism: melt
 
-  chitral_drosh:
-    name: "Drosh"
-    river: "Chitral"
-    district: "Lower Chitral"
-    lat: 35.5606
-    lon: 71.7964
-    elevation_m: 1365
-    slope_deg: 18.2
-    terrain_susceptibility: 0.69
-    drainage_area_km2: 4120.0
+  - basin_id: chitral_drosh
+    name: Chitral River at Drosh
+    district: Lower Chitral
+    lon: 71.79
+    lat: 35.56
+    elevation_mean_m: 1500
+    snow_fraction: 0.40
+    terrain_susceptibility: 0.72
+    primary_mechanism: mixed
 
-  chitral_chitral:
-    name: "Chitral City"
-    river: "Chitral"
-    district: "Lower Chitral"
-    lat: 35.8510
-    lon: 71.7864
-    elevation_m: 1494
-    slope_deg: 20.4
-    terrain_susceptibility: 0.76
-    drainage_area_km2: 2890.0
+  - basin_id: chitral_chitral
+    name: Chitral River at Chitral
+    district: Lower Chitral
+    lon: 71.79
+    lat: 35.85
+    elevation_mean_m: 1500
+    snow_fraction: 0.45
+    terrain_susceptibility: 0.70
+    primary_mechanism: melt

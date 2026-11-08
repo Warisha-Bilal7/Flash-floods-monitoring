@@ -1,34 +1,54 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "floodwatch"
-version = "0.1.0"
-description = "FloodWatch KP: Dual-mechanism flash flood forecasting and alert verification"
+version = "0.2.0"
+description = "FloodWatch KP: two-mechanism flash-flood early warning prototype"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "pandas>=2.0.0",
-    "numpy>=1.24.0",
-    "pyarrow>=12.0.0",
-    "pyyaml>=6.0"
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "pyarrow>=14",
+    "PyYAML>=6",
+    "streamlit>=1.30",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "torch>=2.2",
+    "scikit-learn>=1.3",
+    "requests>=2.31",
+    "pytest>=7",
+    "ruff>=0.5",
+    "pip-audit>=2.7",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
-minversion = "7.0"
 testpaths = ["tests"]
-pythonpath = ["src"]
-addopts = "-ra -q"
-
-[dependency-groups]
-dev = [
-    "numpy>=2.2.6",
-    "pandas>=2.3.3",
-    "pyarrow>=25.0.1",
-    "pytest>=9.2.0",
-    "pyyaml>=6.0.3",
-    "ruff>=0.17.4",
-    "scikit-learn>=1.7.2",
-    "torch>=2.3.0",
+pythonpath = [".", "src"]
+addopts = "-q"
+markers = [
+    "network: test reaches the network (skipped by default in CI)",
+    "slow: test is intentionally slow",
 ]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "artifacts", "data", "runs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

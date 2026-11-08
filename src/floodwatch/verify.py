@@ -1,90 +1,105 @@
-"""
-Pre-Transmission Alert Verification Engine (verify.py)
-======================================================
-Owner: Person 1 (Qamran)
-Published, stable signatures (§6.3).
-Automated gatekeeper blocking hallucinated numbers, incorrect basins,
-and mixed risk vocabularies before dispatch.
+"""Pre-transmission alert verification (published, stable signatures).
+
+``verify.py`` is the safety gatekeeper: every outbound alert, all-clear and test
+message must pass :func:`check_risk_alert` before delivery.
+
+This module is originally the person-1 lane; the signatures below are frozen by
+the v2 backlog §6.3 and are implemented here because messages/runner/app depend
+on them.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Any
 
-# Maximum character constraint for SMS / WhatsApp broadcast
-MAX_ALERT_LENGTH = 1600
-
-# Digit normalization mapping for Urdu and Arabic-Indic numerals
-INDIC_DIGITS_MAP = str.maketrans(
-    "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩",
-    "01234567890123456789"
+from .tiers import (
+    ALL_LEVEL_WORDS,
+    ALL_PUBLIC_WORDS,
+    tier_to_public_word,
+    words_for_tier,
 )
 
-# Standard Tier-to-Vocabulary Table (§3.3)
-TIER_VOCABULARY = {
-    "none": {"GREEN", "none"},
-    "low": {"GREEN", "low"},
-    "moderate": {"YELLOW", "Watch", "watch"},
-    "high": {"ORANGE", "Warning", "warning"},
-    "severe": {"RED", "Emergency", "emergency"}
+MAX_LENGTH = 1600
+HOTLINE = "1122"
+FORBIDDEN_EXTRA = ("fake", "false", "hoax", "confirmed", "true")
+
+_URDU = "۰۱۲۳۴۵۶۷۸۹"
+_ARABIC = "٠١٢٣٤٥٦٧٨٩"
+_DIGIT_MAP = {ord(ch): str(i) for i, ch in enumerate(_URDU)} | {
+    ord(ch): str(i) for i, ch in enumerate(_ARABIC)
 }
-
-ALL_TIER_WORDS = {w.lower() for words in TIER_VOCABULARY.values() for w in words}
-
-
-def normalize_numerals(text: str) -> str:
-    """Translates Urdu/Arabic-Indic digits to standard ASCII numerals."""
-    return text.translate(INDIC_DIGITS_MAP)
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
-def extract_numbers(text: str) -> set[str]:
-    """Extracts all continuous integer and floating point numbers from text."""
-    normalized = normalize_numerals(text)
-    # Match numbers like 1122, 0.62, 25, etc.
-    raw_matches = re.findall(r"\b\d+(?:\.\d+)?\b", normalized)
-    # Return canonical float/int strings
-    canonical = set()
-    for m in raw_matches:
-        try:
-            val = float(m)
-            if val.is_integer():
-                canonical.add(str(int(val)))
-            canonical.add(str(val))
-            canonical.add(m)
-        except ValueError:
-            canonical.add(m)
-    return canonical
+def normalise_digits(text: str) -> str:
+    return str(text).translate(_DIGIT_MAP)
+
+
+def _numbers(text: str) -> list[str]:
+    return _NUMBER_RE.findall(normalise_digits(text))
+
+
+def _numeric_set(values: Iterable[str | float | int]) -> set[float]:
+    out: set[float] = set()
+    for value in values:
+        for token in _numbers(str(value)):
+            try:
+                out.add(float(token))
+            except ValueError:
+                continue
+    return out
+
+
+def _format_variants(value: float | None) -> set[str]:
+    if value is None:
+        return set()
+    variants = {
+        f"{float(value):g}",
+        f"{float(value):.2f}",
+        f"{float(value):.3f}",
+        f"{float(value) * 100:.0f}",
+        f"{float(value) * 100:.1f}",
+    }
+    return variants
+
+
+def _driver_strings(result: Any) -> list[str]:
+    reasons = getattr(result, "reasons", None)
+    if reasons is None:
+        reasons = getattr(result, "top_drivers", None)
+    if reasons is None:
+        return []
+    if isinstance(reasons, str):
+        return [reasons]
+    out: list[str] = []
+    for item in reasons:
+        if isinstance(item, dict):
+            out.append(str(item.get("feature", "")))
+            out.append(str(item.get("weight", "")))
+        else:
+            out.append(str(item))
+    return out
 
 
 def allowed_numbers_for(result: Any) -> set[str]:
-    """
-    Duck-typed extractor collecting legitimate numbers associated with a risk result.
-    Collects score, probabilities, reasons, timestamps, and emergency 1122.
-    """
-    allowed = {"1122"}  # Rescue 1122 hotline is always allowed
-
-    # Add score / probabilities
-    for attr in ["score", "prob_a", "prob_b"]:
-        val = getattr(result, attr, None)
-        if val is not None and isinstance(val, (int, float)):
-            allowed.add(str(round(val, 2)))
-            allowed.add(str(round(val, 3)))
-            allowed.add(str(round(val, 1)))
-            allowed.add(str(round(val * 100)))  # percentages like 62%
-
-    # Add numbers from reasons
-    reasons = getattr(result, "reasons", [])
-    if isinstance(reasons, (list, tuple)):
-        for r in reasons:
-            allowed.update(extract_numbers(str(r)))
-
-    # Add date/time numbers from computed_at if present
-    computed_at = getattr(result, "computed_at", "")
-    if computed_at:
-        allowed.update(extract_numbers(str(computed_at)))
-
+    """Every number the result itself justifies, plus the emergency hotline."""
+    allowed: set[str] = {HOTLINE, "1122"}
+    for attribute in ("score", "prob", "prob_a", "prob_b", "baseline_prob"):
+        value = getattr(result, attribute, None)
+        if isinstance(value, (int, float)):
+            allowed |= _format_variants(float(value))
+    allowed |= set(_numbers(str(getattr(result, "computed_at", ""))))
+    for text in _driver_strings(result):
+        allowed |= set(_numbers(text))
     return allowed
+
+
+def _whole_word(word: str, text: str) -> bool:
+    return (
+        re.search(rf"(?<![A-Za-z]){re.escape(word)}(?![A-Za-z])", text, re.IGNORECASE) is not None
+    )
 
 
 def check_alert(
@@ -92,62 +107,38 @@ def check_alert(
     *,
     basin_id: str,
     tier: str,
-    allowed_numbers: set[str]
+    allowed_numbers: Iterable[str | float | int],
 ) -> list[str]:
-    """
-    Core verification checks:
-      1. Non-empty, length <= 1600
-      2. basin_id explicitly mentioned
-      3. Valid word for the assigned tier present
-      4. Zero forbidden words belonging to any other tier
-      5. Every number exists in allowed_numbers
-    Returns empty list on clean pass.
-    """
+    """Return a list of problems. An empty list means safe to send."""
     problems: list[str] = []
+    if not isinstance(text, str) or not text.strip():
+        return ["text is empty"]
+    if len(text) > MAX_LENGTH:
+        problems.append(f"text is {len(text)} characters; maximum is {MAX_LENGTH}")
 
-    if not text or not text.strip():
-        return ["Message text is empty."]
+    normalised = normalise_digits(text)
+    if basin_id not in normalised:
+        problems.append(f"basin id {basin_id!r} does not appear in the text")
 
-    if len(text) > MAX_ALERT_LENGTH:
-        problems.append(f"Message length ({len(text)}) exceeds maximum {MAX_ALERT_LENGTH} characters.")
+    allowed_words = words_for_tier(tier)
+    if not any(_whole_word(word, normalised) for word in allowed_words):
+        expected = " or ".join(sorted(allowed_words))
+        problems.append(f"text does not contain the expected level word ({expected})")
 
-    # Basin ID check
-    if basin_id.lower() not in text.lower():
-        problems.append(f"Required basin_id '{basin_id}' not found in message text.")
+    forbidden = (ALL_LEVEL_WORDS | ALL_PUBLIC_WORDS) - allowed_words
+    present = sorted(word for word in forbidden if _whole_word(word, normalised))
+    if present:
+        problems.append(f"conflicting level vocabulary present: {present}")
 
-    # Tier vocabulary check
-    norm_text_lower = text.lower()
-    valid_words = {w.lower() for w in TIER_VOCABULARY.get(tier.lower(), set())}
-    forbidden_words = ALL_TIER_WORDS - valid_words
+    allowed_values = _numeric_set(allowed_numbers)
+    bad = sorted({token for token in _numbers(normalised) if float(token) not in allowed_values})
+    if bad:
+        problems.append(f"numbers not justified by the result: {bad}")
 
-    # Check that at least one valid word is present
-    has_valid_word = any(re.search(rf"\b{re.escape(w)}\b", norm_text_lower) for w in valid_words)
-    if not has_valid_word:
-        problems.append(f"Message lacks valid vocabulary for tier '{tier}' ({valid_words}).")
-
-    # Check that NO forbidden word from a different tier is present
-    for fw in forbidden_words:
-        if re.search(rf"\b{re.escape(fw)}\b", norm_text_lower):
-            problems.append(f"Conflicting tier vocabulary detected: found forbidden word '{fw}'.")
-            break
-
-    # Number verification
-    found_numbers = extract_numbers(text)
-    # Normalize allowed numbers set
-    allowed_canonical = set()
-    for n in allowed_numbers:
-        try:
-            val = float(n)
-            if val.is_integer():
-                allowed_canonical.add(str(int(val)))
-            allowed_canonical.add(str(val))
-            allowed_canonical.add(n)
-        except ValueError:
-            allowed_canonical.add(n)
-
-    unauthorized = found_numbers - allowed_canonical
-    if unauthorized:
-        problems.append(f"Unauthorized or hallucinated numbers found in message: {unauthorized}")
+    lowered = normalised.lower()
+    for word in FORBIDDEN_EXTRA:
+        if re.search(rf"(?<![A-Za-z]){re.escape(word)}(?![A-Za-z])", lowered):
+            problems.append(f"speculative word {word!r} is not allowed")
 
     return problems
 
@@ -156,20 +147,25 @@ def check_risk_alert(
     text: str,
     result: Any,
     *,
-    extra_numbers: tuple[str, ...] = (),
-    extra_texts: tuple[str, ...] = ()
+    extra_numbers: Iterable[str | float | int] = (),
+    extra_texts: Iterable[str] = (),
 ) -> list[str]:
-    """
-    Convenience verification entry point taking duck-typed RiskResult.
-    """
-    basin_id = getattr(result, "area_id", "")
-    tier = getattr(result, "tier", "none")
-    allowed = allowed_numbers_for(result)
-    allowed.update(extra_numbers)
+    """Verify a rendered message against the result it claims to describe."""
+    basin_id = str(getattr(result, "area_id", None) or getattr(result, "basin_id", ""))
+    tier = str(getattr(result, "tier", "none"))
+    allowed = allowed_numbers_for(result) | set(_numbers(" ".join(str(t) for t in extra_texts)))
+    allowed |= set(extra_numbers)
+    return check_alert(text, basin_id=basin_id, tier=tier, allowed_numbers=allowed)
 
-    return check_alert(
-        text,
-        basin_id=basin_id,
-        tier=tier,
-        allowed_numbers=allowed
-    )
+
+def level_word(tier: str) -> str | None:
+    return tier_to_public_word(tier)
+
+
+__all__ = [
+    "MAX_LENGTH",
+    "allowed_numbers_for",
+    "check_alert",
+    "check_risk_alert",
+    "normalise_digits",
+]

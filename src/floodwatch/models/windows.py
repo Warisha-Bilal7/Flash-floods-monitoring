@@ -1,144 +1,163 @@
-"""
-Window Spec & Canonical Grid Index Generator (windows.py)
-=========================================================
-Frozen Contract (§3.5).
-Constructs 72-hour sliding window tensors with 1-hour stride.
-Enforces zero data leakage across splits and writes data/processed/grid_index.parquet.
+"""Temporal windowing and the canonical grid index.
+
+Scaffolding for the person-1 lane (M1). Contract file: joint PR to change.
+
+- 72 h lookback, 1 h stride.
+- No window crosses a split boundary (a 30-day buffer is not scored).
+- ``grid_index.parquet`` lists every ``(basin_id, timestamp_utc, split)`` both
+  models must score. A missing row is a bug, not a zero.
+- Scalers/imputers must be fit on train rows only; the helpers here expose the
+  train mask so callers cannot forget.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 
-LOOKBACK_HOURS = 72
-STRIDE_HOURS = 1
+ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_CONFIG = ROOT / "configs" / "split.yaml"
 
-CORE_TEMPORAL_FEATURES = [
-    "rain_1h",
-    "rain_3h",
-    "rain_24h",
-    "rain_72h",
-    "rain_forecast_6h",
-    "temperature_2m",
-    "freezing_level_height",
-    "snow_depth",
-    "degree_day_melt",
-    "rain_on_snow",
-    "soil_moisture_0_to_7cm",
-    "terrain_susceptibility"
-]
+LOOKBACK_H = 72
+STRIDE_H = 1
 
 
-@dataclass(frozen=True)
-class ScalerParameters:
-    means: dict[str, float]
-    stds: dict[str, float]
-
-    def transform(self, df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-        res = df.copy()
-        for col in columns:
-            m = self.means.get(col, 0.0)
-            s = self.stds.get(col, 1.0)
-            if s <= 1e-6:
-                s = 1.0
-            res[col] = (res[col] - m) / s
-        return res
+def load_split_config(path: str | Path | None = None) -> dict:
+    return yaml.safe_load(Path(path or DEFAULT_CONFIG).read_text(encoding="utf-8"))
 
 
-def fit_train_scaler(train_df: pd.DataFrame, columns: list[str]) -> ScalerParameters:
-    """Fits normalization means and stds strictly on train split rows."""
-    means = {}
-    stds = {}
-    for col in columns:
-        vals = train_df[col].dropna()
-        means[col] = float(vals.mean()) if len(vals) > 0 else 0.0
-        s = float(vals.std()) if len(vals) > 1 else 1.0
-        stds[col] = s if s > 1e-6 else 1.0
-    return ScalerParameters(means=means, stds=stds)
+def split_bounds(cfg: dict | None = None) -> dict[str, tuple[pd.Timestamp, pd.Timestamp | None]]:
+    cfg = cfg or load_split_config()
+    bounds: dict[str, tuple[pd.Timestamp, pd.Timestamp | None]] = {}
+    for name, block in cfg["splits"].items():
+        start = pd.to_datetime(block["start"], utc=True)
+        end = pd.to_datetime(block["end"], utc=True) if block.get("end") else None
+        bounds[name] = (start, end)
+    return bounds
 
 
-def create_basin_windows(
-    basin_df: pd.DataFrame,
-    features: list[str] = CORE_TEMPORAL_FEATURES,
-    lookback: int = LOOKBACK_HOURS
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]:
-    """
-    Constructs 72h sliding windows for a single basin.
-    Returns:
-      - X_temporal: (N, 72, C)
-      - X_spatial: (N, 3, 3, 3) (rain, temp, freezing over 3x3 patch)
-      - Y: (N,) target labels
-      - meta_df: DataFrame with (basin_id, timestamp_utc, split)
-    """
-    df = basin_df.sort_values("timestamp_utc").reset_index(drop=True)
-    n = len(df)
-    if n <= lookback:
-        return (
-            np.zeros((0, lookback, len(features)), dtype=np.float32),
-            np.zeros((0, 3, 3, 3), dtype=np.float32),
-            np.zeros((0,), dtype=np.float32),
-            pd.DataFrame(columns=["basin_id", "timestamp_utc", "split"])
-        )
-
-    vals = df[features].values.astype(np.float32)
-    labels = df["label_flood_6h"].values.astype(np.float32)
-    times = df["timestamp_utc"].values
-    splits = df["split"].values
-    basin_id = df["basin_id"].iloc[0]
-
-    temp_list = []
-    spat_list = []
-    y_list = []
-    meta_list = []
-
-    # Map spatial channels: rain_1h (0), temperature_2m (5), freezing_level_height (6)
-    spatial_indices = [0, 5, 6]
-
-    for i in range(lookback, n):
-        # Assert split boundary invariance: Window cannot span different splits!
-        window_splits = set(splits[i - lookback : i + 1])
-        if len(window_splits) > 1:
-            continue  # Discard window crossing chronological split boundary
-
-        t_seq = vals[i - lookback : i]  # (72, C)
-        # Synthesize 3x3 patch centered on current cell
-        current_spatial = t_seq[-1, spatial_indices]  # (3,)
-        patch = np.tile(current_spatial, (3, 3, 1)).transpose(2, 0, 1)  # (3, 3, 3)
-
-        temp_list.append(t_seq)
-        spat_list.append(patch)
-        y_list.append(labels[i])
-        meta_list.append((basin_id, times[i], splits[i]))
-
-    if not temp_list:
-        return (
-            np.zeros((0, lookback, len(features)), dtype=np.float32),
-            np.zeros((0, 3, 3, 3), dtype=np.float32),
-            np.zeros((0,), dtype=np.float32),
-            pd.DataFrame(columns=["basin_id", "timestamp_utc", "split"])
-        )
-
-    return (
-        np.array(temp_list, dtype=np.float32),
-        np.array(spat_list, dtype=np.float32),
-        np.array(y_list, dtype=np.float32),
-        pd.DataFrame(meta_list, columns=["basin_id", "timestamp_utc", "split"])
-    )
+def assign_split(timestamps: pd.Series, cfg: dict | None = None) -> pd.Series:
+    """Return split label per timestamp; NaT gaps (buffers) become None."""
+    ts = pd.to_datetime(timestamps, utc=True)
+    out = pd.Series([None] * len(ts), index=ts.index, dtype="object")
+    # Later splits overwrite earlier ones at boundaries; the ranges are disjoint.
+    for name, (start, end) in split_bounds(cfg).items():
+        mask = ts >= start
+        if end is not None:
+            mask &= ts < end
+        out = out.mask(mask, name)
+    return out
 
 
-def export_canonical_grid(
-    meta_df: pd.DataFrame,
-    output_path: Path | str = "data/processed/grid_index.parquet"
+def train_mask(features: pd.DataFrame, cfg: dict | None = None) -> pd.Series:
+    splits = assign_split(features["timestamp_utc"], cfg)
+    return (splits == "train").fillna(False)
+
+
+def build_grid_index(
+    features: pd.DataFrame,
+    *,
+    cfg: dict | None = None,
+    include_test: bool = True,
 ) -> pd.DataFrame:
-    """Exports unique canonical grid that both Model A and Model B must evaluate."""
-    p = Path(output_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    grid = meta_df[["basin_id", "timestamp_utc", "split"]].drop_duplicates().sort_values(
-        ["basin_id", "timestamp_utc"]
-    ).reset_index(drop=True)
-    grid.to_parquet(p, index=False)
+    """Every scored ``(basin_id, timestamp_utc)`` with its split and label."""
+    df = features.copy()
+    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
+    df["split"] = assign_split(df["timestamp_utc"], cfg)
+    df = df[df["split"].notna()].copy()
+    if not include_test:
+        df = df[df["split"] != "test"]
+    grid = (
+        df[["basin_id", "timestamp_utc", "split"]]
+        .drop_duplicates(["basin_id", "timestamp_utc"])
+        .sort_values(["basin_id", "timestamp_utc"])
+        .reset_index(drop=True)
+    )
+    grid["split"] = grid["split"].astype("string")
+    grid["timestamp_utc"] = pd.to_datetime(grid["timestamp_utc"], utc=True)
     return grid
+
+
+def write_grid_index(grid: pd.DataFrame, path: str | Path) -> Path:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    grid.to_parquet(p, index=False)
+    return p
+
+
+def read_grid_index(path: str | Path) -> pd.DataFrame:
+    grid = pd.read_parquet(path)
+    grid["timestamp_utc"] = pd.to_datetime(grid["timestamp_utc"], utc=True)
+    return grid
+
+
+def _basin_arrays(
+    features: pd.DataFrame, feature_columns: tuple[str, ...] | list[str]
+) -> dict[str, tuple[np.ndarray, pd.DatetimeIndex]]:
+    arrays: dict[str, tuple[np.ndarray, pd.DatetimeIndex]] = {}
+    for basin_id, group in features.groupby("basin_id", sort=False):
+        group = group.sort_values("timestamp_utc")
+        index = pd.DatetimeIndex(pd.to_datetime(group["timestamp_utc"], utc=True))
+        full = pd.date_range(index.min(), index.max(), freq="h", tz="UTC")
+        frame = group.set_index(index).reindex(full)
+        values = frame[list(feature_columns)].astype("float32").fillna(0.0).to_numpy()
+        arrays[str(basin_id)] = (values, full)
+    return arrays
+
+
+def iter_sequences(
+    features: pd.DataFrame,
+    keys: pd.DataFrame,
+    feature_columns: tuple[str, ...] | list[str],
+    *,
+    lookback_h: int = LOOKBACK_H,
+    batch_size: int = 2048,
+    pad_short: bool = False,
+) -> Iterator[tuple[pd.DataFrame, np.ndarray]]:
+    """Yield ``(key_chunk, X)`` with ``X`` shaped ``(n, lookback_h, n_features)``.
+
+    Training uses ``pad_short=False``: rows whose lookback is incomplete are
+    dropped and never silently zero-filled into a valid sample.
+
+    Scoring must cover the whole canonical grid, so ``pad_short=True`` is used
+    there: the short history at the very start of a record is edge-padded
+    (earliest observed value), which keeps every grid row scorable without
+    inventing zeros.
+    """
+    arrays = _basin_arrays(features, feature_columns)
+    keys = keys.reset_index(drop=True)
+    n_features = len(feature_columns)
+
+    for start in range(0, len(keys), batch_size):
+        chunk = keys.iloc[start : start + batch_size].reset_index(drop=True)
+        X = np.zeros((len(chunk), lookback_h, n_features), dtype=np.float32)
+        keep = np.zeros(len(chunk), dtype=bool)
+        for basin_id, positions in chunk.groupby("basin_id", sort=False).groups.items():
+            arr, index = arrays[str(basin_id)]
+            pos = index.get_indexer(pd.DatetimeIndex(chunk.loc[positions, "timestamp_utc"]))
+            for local, p in zip(positions, pos, strict=False):
+                if p < lookback_h - 1:
+                    if not pad_short:
+                        continue
+                    # Edge-pad: repeat the earliest available hour.
+                    start = max(0, p - lookback_h + 1)
+                    block = arr[start : p + 1]
+                    pad = lookback_h - len(block)
+                    X[int(local)] = np.concatenate(
+                        [np.repeat(block[:1], pad, axis=0), block], axis=0
+                    )
+                    keep[int(local)] = True
+                    continue
+                X[int(local)] = arr[p - lookback_h + 1 : p + 1]
+                keep[int(local)] = True
+        yield chunk.loc[keep].reset_index(drop=True), X[keep]
+
+
+def latest_keys(grid_index: pd.DataFrame) -> pd.DataFrame:
+    """Newest row per basin (used by the adapter and the dashboard)."""
+    grid = grid_index.sort_values("timestamp_utc")
+    return grid.groupby("basin_id", as_index=False).tail(1).reset_index(drop=True)
