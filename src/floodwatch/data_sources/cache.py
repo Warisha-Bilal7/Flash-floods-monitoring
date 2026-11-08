@@ -6,11 +6,12 @@ in parquet or feather format keyed by deterministic SHA-256 hash.
 """
 
 from __future__ import annotations
+
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any
+
 import pandas as pd
 
 DEFAULT_CACHE_DIR = Path("data/processed/cache")
@@ -36,7 +37,7 @@ class DataCache:
         if file_path.exists():
             try:
                 return pd.read_parquet(file_path)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return None
         return None
 

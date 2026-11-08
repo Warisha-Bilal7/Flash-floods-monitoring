@@ -6,8 +6,9 @@ Enforces the 6-column schema and validates model output Parquet files.
 """
 
 from __future__ import annotations
+
 import json
-from typing import Any
+
 import pandas as pd
 
 # Supported modules
@@ -46,7 +47,6 @@ REQUIRED_MODEL_FILE_COLUMNS = [
 
 class SchemaError(ValueError):
     """Raised when data violates the FloodWatch prediction schema."""
-    pass
 
 
 def validate_predictions(df: pd.DataFrame) -> None:

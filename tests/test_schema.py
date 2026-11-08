@@ -1,9 +1,9 @@
 """Unit tests for schema.py prediction contract."""
 
-import pytest
 import pandas as pd
-import numpy as np
-from floodwatch.schema import validate_predictions, validate_model_file, SchemaError
+import pytest
+
+from floodwatch.schema import SchemaError, validate_predictions
 
 
 def test_validate_predictions_valid():

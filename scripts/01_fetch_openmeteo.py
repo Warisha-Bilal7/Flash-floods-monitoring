@@ -7,14 +7,20 @@ Usage:
 """
 
 from __future__ import annotations
+
 import argparse
 from pathlib import Path
-import yaml
+
 import pandas as pd
+import yaml
 
 from floodwatch.data_sources.cache import DataCache
+from floodwatch.data_sources.health import (
+    build_health_report,
+    evaluate_stream_health,
+    save_source_health,
+)
 from floodwatch.data_sources.openmeteo import fetch_openmeteo_series
-from floodwatch.data_sources.health import evaluate_stream_health, build_health_report, save_source_health
 
 
 def main() -> None:

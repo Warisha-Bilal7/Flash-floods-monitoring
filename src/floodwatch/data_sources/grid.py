@@ -6,8 +6,9 @@ to feed the spatial branch of Model A (CNN-LSTM).
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any
+
 import numpy as np
 
 

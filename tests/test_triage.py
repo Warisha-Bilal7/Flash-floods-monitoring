@@ -1,8 +1,10 @@
 """Unit and adversarial test suite for triage.py."""
 
 from datetime import datetime, timezone
+
 import pytest
-from floodwatch.triage import triage, Verdict, Advisory, BANNED_WORDS
+
+from floodwatch.triage import BANNED_WORDS, Advisory, Verdict, triage
 
 
 @pytest.fixture

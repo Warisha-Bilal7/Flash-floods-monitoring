@@ -11,18 +11,17 @@ Demonstrates the full top-to-bottom training lifecycle:
   7. Final evaluation summary across both mechanisms and fused outputs
 """
 
-import os
 import json
-import hashlib
-from datetime import datetime, timezone
+import os
+
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import auc, precision_recall_curve
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import precision_recall_curve, auc
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
 
 # Set determinism
 SEED = 42
@@ -361,7 +360,7 @@ pod_drift = abs(val_pod - train_pod)
 far_drift = abs(val_far - train_far)
 d01_pass = (pod_drift <= 0.10) and (far_drift <= 0.10)
 
-print(f"D-01 Validation Check (Drift <= 0.10):")
+print("D-01 Validation Check (Drift <= 0.10):")
 print(f"  POD Drift = {pod_drift:.3f} | FAR Drift = {far_drift:.3f} -> {'PASS [APPROVED]' if d01_pass else 'BREACH [ESCALATE]'}")
 
 # Assign tiers according to tiers.py

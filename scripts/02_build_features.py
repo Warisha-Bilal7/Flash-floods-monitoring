@@ -7,18 +7,20 @@ Usage:
 """
 
 from __future__ import annotations
+
 import argparse
 from pathlib import Path
-import yaml
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+import yaml
 
 from floodwatch.features import build_feature_table
 from floodwatch.models.windows import (
-    fit_train_scaler,
+    CORE_TEMPORAL_FEATURES,
     create_basin_windows,
     export_canonical_grid,
-    CORE_TEMPORAL_FEATURES
+    fit_train_scaler,
 )
 
 
@@ -53,8 +55,9 @@ def main() -> None:
     in_file = Path(args.input)
     if not in_file.exists():
         print(f"Input file {in_file} not found. Running fetch first...")
-        from scripts.01_fetch_openmeteo import main as fetch_main
-        fetch_main()
+        import importlib
+        fetch_mod = importlib.import_module("scripts.01_fetch_openmeteo")
+        fetch_mod.main()
 
     print("Loading raw features...")
     df = pd.read_parquet(in_file)

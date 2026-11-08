@@ -9,11 +9,13 @@ Usage:
 """
 
 from __future__ import annotations
+
 import argparse
 import json
 from pathlib import Path
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 def main() -> None:
@@ -25,8 +27,9 @@ def main() -> None:
     in_file = Path(args.input)
     if not in_file.exists():
         print("Raw features not found. Creating features first...")
-        from scripts.01_fetch_openmeteo import main as fetch_main
-        fetch_main()
+        import importlib
+        fetch_mod = importlib.import_module("scripts.01_fetch_openmeteo")
+        fetch_mod.main()
 
     print("Computing climatological percentiles per basin...")
     df = pd.read_parquet(in_file)

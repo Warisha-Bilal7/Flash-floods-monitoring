@@ -7,13 +7,13 @@ Strictly rules-based (no LLM, no external network calls).
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from datetime import datetime, date, timezone
-from enum import Enum
+
 import json
-from pathlib import Path
 import re
-from typing import Any
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from enum import Enum
+from pathlib import Path
 
 from floodwatch.verify import normalize_numerals
 
@@ -210,7 +210,7 @@ def triage(
         if re.search(rf"\b{re.escape(alias_name.lower())}\b", norm_text):
             matched_set.add(b_id)
 
-    matched_basins = sorted(list(matched_set))
+    matched_basins = sorted(matched_set)
 
     # Case: No monitored basin identified
     if not matched_basins:

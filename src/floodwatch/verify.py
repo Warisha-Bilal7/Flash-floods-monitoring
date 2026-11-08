@@ -8,6 +8,7 @@ and mixed risk vocabularies before dispatch.
 """
 
 from __future__ import annotations
+
 import re
 from typing import Any
 
@@ -70,7 +71,7 @@ def allowed_numbers_for(result: Any) -> set[str]:
             allowed.add(str(round(val, 2)))
             allowed.add(str(round(val, 3)))
             allowed.add(str(round(val, 1)))
-            allowed.add(str(int(round(val * 100))))  # percentages like 62%
+            allowed.add(str(round(val * 100)))  # percentages like 62%
 
     # Add numbers from reasons
     reasons = getattr(result, "reasons", [])

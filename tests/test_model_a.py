@@ -1,13 +1,12 @@
 """Unit tests for Model A (Cloudburst CNN-LSTM)."""
 
-import pytest
 import torch
+
 from floodwatch.models.model_a import (
-    CloudburstCNN_LSTM,
-    MAX_CONV_BLOCKS,
     MAX_CONV_FILTERS,
     MAX_LSTM_LAYERS,
-    MAX_LSTM_UNITS
+    MAX_LSTM_UNITS,
+    CloudburstCNN_LSTM,
 )
 
 

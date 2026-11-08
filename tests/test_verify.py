@@ -1,7 +1,8 @@
 """Unit tests for verify.py alert verification engine."""
 
 from types import SimpleNamespace
-from floodwatch.verify import check_alert, check_risk_alert, allowed_numbers_for
+
+from floodwatch.verify import allowed_numbers_for, check_alert
 
 
 def test_clean_template_passes():

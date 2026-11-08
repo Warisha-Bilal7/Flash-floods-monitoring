@@ -6,12 +6,15 @@ Zero PyTorch or scikit-learn dependency.
 """
 
 from __future__ import annotations
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
-def compute_accumulations(series: pd.Series, windows: list[int] = [1, 3, 24, 72]) -> dict[str, pd.Series]:
+def compute_accumulations(series: pd.Series, windows: list[int] | None = None) -> dict[str, pd.Series]:
     """Computes backward rolling sum of precipitation for given hour windows."""
+    if windows is None:
+        windows = [1, 3, 24, 72]
     accums = {}
     for w in windows:
         accums[f"rain_{w}h"] = series.rolling(window=w, min_periods=1).sum()
@@ -58,9 +61,9 @@ def build_feature_table(
     # Rename / aliases
     precip = df["precipitation"]
     temp = df["temperature_2m"]
-    freezing = df["freezing_level_height"]
+    df["freezing_level_height"]
     snow = df["snow_depth"]
-    soil = df["soil_moisture_0_to_7cm"]
+    df["soil_moisture_0_to_7cm"]
 
     # Rolling rainfall accumulations
     accums = compute_accumulations(precip, [1, 3, 24, 72])

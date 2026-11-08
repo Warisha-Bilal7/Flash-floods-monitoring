@@ -7,15 +7,12 @@ Temporal Branch: 1-layer LSTM over 72-hour lookback.
 """
 
 from __future__ import annotations
-import json
-from dataclasses import dataclass
-from typing import Any
+
 import numpy as np
 import torch
-import torch.nn as nn
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import precision_recall_curve, auc
-
+from sklearn.metrics import auc, precision_recall_curve
+from torch import nn
 
 # Enforced architectural constraints (§4.3)
 MAX_CONV_BLOCKS = 2

@@ -7,11 +7,12 @@ Enforces zero data leakage across splits and writes data/processed/grid_index.pa
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
-
 
 LOOKBACK_HOURS = 72
 STRIDE_HOURS = 1

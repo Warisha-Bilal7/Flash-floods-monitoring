@@ -14,25 +14,26 @@ Features:
 """
 
 from __future__ import annotations
+
 import argparse
 import hashlib
 import json
-import os
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
 
-from floodwatch.schema import validate_model_file
 from floodwatch.models.model_a import (
     CloudburstCNN_LSTM,
     LogisticRegressionBaselineA,
-    evaluate_model_a_metrics
+    evaluate_model_a_metrics,
 )
 from floodwatch.models.windows import CORE_TEMPORAL_FEATURES
+from floodwatch.schema import validate_model_file
 
 BASINS = [
     "swat_kalam", "swat_madyan", "swat_chakdara", "panjkora_dir",
@@ -184,7 +185,7 @@ def main() -> None:
     print(f"  Baseline Validation Metrics: PR-AUC={base_metrics['pr_auc']:.4f} | POD={base_metrics['pod']:.3f} | FAR={base_metrics['far']:.3f} | CSI={base_metrics['csi']:.3f}")
 
     # 4. Neural Network Training with Epoch-by-Epoch Validation & Early Stopping
-    print(f"\n[STEP 3] Training Model A (Cloudburst CNN-LSTM) with Early Stopping...")
+    print("\n[STEP 3] Training Model A (Cloudburst CNN-LSTM) with Early Stopping...")
     model = CloudburstCNN_LSTM(in_spatial_channels=3, in_temporal_features=n_features).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
     criterion = nn.BCELoss()
