@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "floodwatch"
+version = "0.1.0"
+description = "FloodWatch KP: Dual-mechanism flash flood forecasting and alert verification"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "pyarrow>=12.0.0",
+    "pyyaml>=6.0"
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -q"
+
+[dependency-groups]
+dev = [
+    "numpy>=2.2.6",
+    "pandas>=2.3.3",
+    "pyarrow>=25.0.1",
+    "pytest>=9.2.0",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.7.2",
+    "torch>=2.14.1",
+]

@@ -1,0 +1,31 @@
+# Chronological Split Specification (Frozen Contract D-06)
+# Mandatory 30-day chronological buffer between splits to prevent autocorrelation leakage
+schema_version: 1
+
+splits:
+  train:
+    start_utc: "2010-01-01T00:00:00Z"
+    end_utc: "2021-11-30T23:00:00Z"
+    description: "Multi-year historical baseline from 2010 super floods through 2021"
+
+  buffer_1:
+    start_utc: "2021-12-01T00:00:00Z"
+    end_utc: "2021-12-31T23:00:00Z"
+    duration_days: 31
+    leakage_guard: true
+
+  validation:
+    start_utc: "2022-01-01T00:00:00Z"
+    end_utc: "2022-11-30T23:00:00Z"
+    description: "Contains August 2022 extreme monsoon event for calibration and demo"
+
+  buffer_2:
+    start_utc: "2022-12-01T00:00:00Z"
+    end_utc: "2022-12-31T23:00:00Z"
+    duration_days: 31
+    leakage_guard: true
+
+  test:
+    start_utc: "2023-01-01T00:00:00Z"
+    end_utc: "2024-12-31T23:00:00Z"
+    description: "Strictly guarded test holdout; evaluated exactly once at Milestone M7"

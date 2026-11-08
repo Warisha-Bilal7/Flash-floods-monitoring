@@ -1,0 +1,95 @@
+# Basins Configuration: 8 Northern Khyber Pakhtunkhwa River Basins
+# Coordinate centroids and terrain attributes
+schema_version: 1
+
+basins:
+  # Swat River Basin
+  swat_kalam:
+    name: "Kalam"
+    river: "Swat"
+    district: "Swat"
+    lat: 35.4906
+    lon: 72.5796
+    elevation_m: 2000
+    slope_deg: 24.5
+    terrain_susceptibility: 0.82
+    drainage_area_km2: 650.0
+
+  swat_madyan:
+    name: "Madyan"
+    river: "Swat"
+    district: "Swat"
+    lat: 35.1375
+    lon: 72.5342
+    elevation_m: 1320
+    slope_deg: 19.8
+    terrain_susceptibility: 0.74
+    drainage_area_km2: 1420.0
+
+  swat_chakdara:
+    name: "Chakdara"
+    river: "Swat"
+    district: "Lower Dir"
+    lat: 34.6567
+    lon: 72.0361
+    elevation_m: 690
+    slope_deg: 12.1
+    terrain_susceptibility: 0.58
+    drainage_area_km2: 5780.0
+
+  # Panjkora River Basin
+  panjkora_dir:
+    name: "Upper Dir"
+    river: "Panjkora"
+    district: "Upper Dir"
+    lat: 35.2074
+    lon: 71.8753
+    elevation_m: 1420
+    slope_deg: 22.0
+    terrain_susceptibility: 0.79
+    drainage_area_km2: 890.0
+
+  panjkora_talash:
+    name: "Talash"
+    river: "Panjkora"
+    district: "Lower Dir"
+    lat: 34.7214
+    lon: 71.9167
+    elevation_m: 780
+    slope_deg: 14.3
+    terrain_susceptibility: 0.62
+    drainage_area_km2: 2450.0
+
+  # Chitral River Basin
+  chitral_mastuj:
+    name: "Mastuj"
+    river: "Chitral"
+    district: "Upper Chitral"
+    lat: 36.2792
+    lon: 72.5117
+    elevation_m: 2359
+    slope_deg: 26.8
+    terrain_susceptibility: 0.88
+    drainage_area_km2: 1250.0
+
+  chitral_drosh:
+    name: "Drosh"
+    river: "Chitral"
+    district: "Lower Chitral"
+    lat: 35.5606
+    lon: 71.7964
+    elevation_m: 1365
+    slope_deg: 18.2
+    terrain_susceptibility: 0.69
+    drainage_area_km2: 4120.0
+
+  chitral_chitral:
+    name: "Chitral City"
+    river: "Chitral"
+    district: "Lower Chitral"
+    lat: 35.8510
+    lon: 71.7864
+    elevation_m: 1494
+    slope_deg: 20.4
+    terrain_susceptibility: 0.76
+    drainage_area_km2: 2890.0

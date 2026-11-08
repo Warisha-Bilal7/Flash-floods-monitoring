@@ -1,0 +1,13 @@
+# Regional bounding box for Northern Khyber Pakhtunkhwa (Hindukush / Karakoram foothills)
+schema_version: 1
+
+region:
+  name: "Northern Khyber Pakhtunkhwa"
+  bounds:
+    lat_min: 34.0
+    lat_max: 37.0
+    lon_min: 71.0
+    lon_max: 74.0
+  grid_resolution_deg: 0.10   # ~10 km multi-point spacing
+  patch_size: 3               # 3x3 spatial patch around each basin centroid
+  timezone: "UTC"

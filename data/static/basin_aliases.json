@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "aliases": {
+    "kalam": "swat_kalam",
+    "کالام": "swat_kalam",
+    "calam": "swat_kalam",
+    "madyan": "swat_madyan",
+    "مدین": "swat_madyan",
+    "median": "swat_madyan",
+    "chakdara": "swat_chakdara",
+    "چکدرہ": "swat_chakdara",
+    "chakdarra": "swat_chakdara",
+    "dir": "panjkora_dir",
+    "دیر": "panjkora_dir",
+    "upper dir": "panjkora_dir",
+    "دیر بالا": "panjkora_dir",
+    "talash": "panjkora_talash",
+    "تلاش": "panjkora_talash",
+    "mastuj": "chitral_mastuj",
+    "مستوج": "chitral_mastuj",
+    "drosh": "chitral_drosh",
+    "دروش": "chitral_drosh",
+    "chitral": "chitral_chitral",
+    "چترال": "chitral_chitral",
+    "chitral city": "chitral_chitral"
+  }
+}

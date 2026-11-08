@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "advisories": [
+    {
+      "source": "DEMO_PDMA_KP",
+      "title": "Flash Flood Advisory: High flows expected in Swat River upper catchments",
+      "url": "https://pdma.gov.pk/advisories/demo-2022-swat",
+      "issued_at": "2026-11-08T06:00:00Z",
+      "areas": ["swat_kalam", "swat_madyan"]
+    }
+  ]
+}
