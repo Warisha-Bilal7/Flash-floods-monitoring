@@ -1,0 +1,192 @@
+name: FloodWatch KP — CI
+
+on:
+  push:
+    branches:
+      - feature/person-a
+      - feature/person-b
+      - warisha/ensemble
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Lint & Static Analysis
+  # ─────────────────────────────────────────────
+  lint:
+    name: Lint (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff lint
+        run: ruff check src/ scripts/ tests/ --output-format=github
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Unit Tests (Person 1 Scope)
+  # ─────────────────────────────────────────────
+  test-person-a:
+    name: Tests — Person 1 (Model A, Schema, Verify, Triage)
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run Person 1 unit tests
+        run: uv run pytest tests/test_schema.py tests/test_model_a.py tests/test_verify.py tests/test_triage.py -v --tb=short
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-person-a
+          path: .pytest_cache/
+
+  # ─────────────────────────────────────────────
+  # JOB 3: Artifact Schema Validation
+  # ─────────────────────────────────────────────
+  validate-artifacts:
+    name: Validate Model A Artifacts
+    runs-on: ubuntu-latest
+    needs: test-person-a
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Check artifacts exist
+        run: |
+          echo "Checking required artifacts..."
+          test -f artifacts/a/model_a.pt        && echo "✅ model_a.pt found"        || (echo "❌ model_a.pt missing" && exit 1)
+          test -f artifacts/a/predictions_a.parquet && echo "✅ predictions_a.parquet found" || (echo "❌ predictions_a.parquet missing" && exit 1)
+          test -f artifacts/a/manifest.json     && echo "✅ manifest.json found"     || (echo "❌ manifest.json missing" && exit 1)
+
+      - name: Validate parquet schema
+        run: |
+          uv run python - <<'EOF'
+          import pandas as pd, sys
+          df = pd.read_parquet("artifacts/a/predictions_a.parquet")
+          required = {"basin_id", "timestamp", "prob_flood", "split"}
+          missing = required - set(df.columns)
+          if missing:
+              print(f"FAIL: missing columns: {missing}")
+              sys.exit(1)
+          print(f"PASS: parquet schema valid — {len(df):,} rows, columns: {list(df.columns)}")
+          EOF
+
+      - name: Validate manifest
+        run: |
+          uv run python - <<'EOF'
+          import json, sys
+          with open("artifacts/a/manifest.json") as f:
+              m = json.load(f)
+          required = {"model", "train_start", "train_end", "val_year", "val_f1", "val_pod", "val_far", "pr_auc"}
+          missing = required - set(m.keys())
+          if missing:
+              print(f"WARN: manifest missing keys: {missing}")
+          print(f"PASS: manifest OK — val_f1={m.get('val_f1')}, pr_auc={m.get('pr_auc')}")
+          EOF
+
+  # ─────────────────────────────────────────────
+  # JOB 4: Decision D-01 Drift Guard
+  # ─────────────────────────────────────────────
+  drift-guard:
+    name: Decision D-01 Calibration Drift Guard
+    runs-on: ubuntu-latest
+    needs: validate-artifacts
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: D-01 Drift guard check
+        run: |
+          uv run python - <<'EOF'
+          import json, sys
+
+          with open("artifacts/a/manifest.json") as f:
+              m = json.load(f)
+
+          # Thresholds from D-01 spec
+          POD_MIN   = 0.70   # Minimum acceptable POD
+          FAR_MAX   = 0.70   # Maximum acceptable FAR
+          F1_MIN    = 0.50   # Minimum acceptable F1
+          PR_AUC_MIN = 0.70  # Minimum acceptable PR-AUC
+
+          pod    = m.get("val_pod",  0)
+          far    = m.get("val_far",  1)
+          f1     = m.get("val_f1",   0)
+          pr_auc = m.get("pr_auc",   0)
+
+          failures = []
+          if pod < POD_MIN:    failures.append(f"POD {pod:.4f} < {POD_MIN} threshold")
+          if far > FAR_MAX:    failures.append(f"FAR {far:.4f} > {FAR_MAX} threshold")
+          if f1  < F1_MIN:     failures.append(f"F1  {f1:.4f} < {F1_MIN} threshold")
+          if pr_auc < PR_AUC_MIN: failures.append(f"PR-AUC {pr_auc:.4f} < {PR_AUC_MIN} threshold")
+
+          print("── D-01 Calibration Drift Guard ──────────────────")
+          print(f"  POD    : {pod:.4f}  (min {POD_MIN})")
+          print(f"  FAR    : {far:.4f}  (max {FAR_MAX})")
+          print(f"  F1     : {f1:.4f}  (min {F1_MIN})")
+          print(f"  PR-AUC : {pr_auc:.4f}  (min {PR_AUC_MIN})")
+          print("──────────────────────────────────────────────────")
+
+          if failures:
+              for f in failures:
+                  print(f"❌ FAIL: {f}")
+              sys.exit(1)
+          else:
+              print("✅ D-01 PASSED — Model A is deployment-ready")
+          EOF
